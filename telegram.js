@@ -1,5 +1,6 @@
 const axios = require("axios");
-const { BOT_TOKEN, CHAT_ID } = require("./config");
+const { BOT_TOKEN } = require("./config");
+const { loadSubscribers } = require("./subscriber");
 
 function getJobAge(postedDate) {
 
@@ -170,28 +171,42 @@ function buildMessage(job) {
 
 async function sendTelegram(job) {
 
-    try {
+    const subscribers = loadSubscribers();
 
-        const response = await axios.post(
-            `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
-            {
-                chat_id: CHAT_ID,
-                text: buildMessage(job),
-                parse_mode: "HTML",
-                disable_web_page_preview: false
-            }
-        );
+    if (!subscribers.length) {
+        console.log("⚠️ No subscribers found.");
+        return;
+    }
 
-        console.log(`✅ Telegram sent for Job ID ${job.id}`);
+    let success = 0;
 
-        return response.data;
+    for (const chatId of subscribers) {
 
-    } catch (err) {
+        try {
 
-        console.error("❌ Telegram Error:");
-        console.error(err.response?.data || err.message);
+            await axios.post(
+                `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+                {
+                    chat_id: chatId,
+                    text: buildMessage(job),
+                    parse_mode: "HTML",
+                    disable_web_page_preview: false
+                }
+            );
+
+            success++;
+
+        } catch (err) {
+
+            console.error(`❌ Failed to send to ${chatId}`);
+
+            console.error(err.response?.data || err.message);
+
+        }
 
     }
+
+    console.log(`✅ Telegram sent to ${success}/${subscribers.length} subscribers for Job ID ${job.id}`);
 
 }
 

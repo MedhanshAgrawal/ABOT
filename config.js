@@ -7,7 +7,7 @@ module.exports = {
     CHAT_ID: process.env.CHAT_ID,
 
     // Amazon Search
-    MAX_PAGES: 5,
+    MAX_PAGES: 2,
 
     // Preferred cities
     CITIES: [

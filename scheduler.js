@@ -2,6 +2,7 @@ const cron = require("node-cron");
 const { getLatestJobs } = require("./amazon");
 const { loadJobs, saveJobs } = require("./database");
 const { sendTelegram } = require("./telegram");
+const { startPolling } = require("./telegramCommands");
 
 let isRunning = false;
 
@@ -13,6 +14,8 @@ async function checkJobs() {
     }
 
     isRunning = true;
+
+    const start = Date.now();
 
     try {
 
@@ -27,7 +30,7 @@ async function checkJobs() {
 
         const oldJobs = loadJobs();
 
-        // First run - just save existing jobs
+        // First run - save jobs only
         if (oldJobs.length === 0) {
 
             console.log("📥 First run detected.");
@@ -44,38 +47,50 @@ async function checkJobs() {
             return;
         }
 
-        const knownIds = new Set(oldJobs.map(j => j.id));
+        // Use URL as unique key
+        const knownJobs = new Set(oldJobs.map(job => job.url));
 
         let newCount = 0;
 
         for (const job of latestJobs) {
 
-            if (knownIds.has(job.id))
+            if (knownJobs.has(job.url))
                 continue;
 
             console.log(`🆕 ${job.title}`);
 
-            await sendTelegram(job);
+            try {
+
+                await sendTelegram(job);
+
+            } catch (err) {
+
+                console.error("❌ Telegram send failed:", err.message);
+
+            }
 
             oldJobs.push({
                 ...job,
                 detectedAt: new Date().toISOString()
             });
 
-            knownIds.add(job.id);
+            knownJobs.add(job.url);
+
             newCount++;
+
         }
 
         // Keep only last 30 days
         const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
 
-        const filtered = oldJobs.filter(j =>
-            Date.now() - new Date(j.detectedAt).getTime() < THIRTY_DAYS
+        const filteredJobs = oldJobs.filter(job =>
+            Date.now() - new Date(job.detectedAt).getTime() < THIRTY_DAYS
         );
 
-        saveJobs(filtered);
+        saveJobs(filteredJobs);
 
         console.log(`🎉 ${newCount} new jobs found`);
+        console.log(`⏱ Completed in ${((Date.now() - start) / 1000).toFixed(2)} sec`);
 
     } catch (err) {
 
@@ -90,17 +105,27 @@ async function checkJobs() {
 
 }
 
-// Run immediately when the app starts
-checkJobs();
+(async () => {
 
-// Run every 5 minutes
-cron.schedule(
-    "*/5 * * * *",
-    async () => {
-        await checkJobs();
-    },
-    {
-        timezone: "Asia/Kolkata"
-    }
-);
-console.log("🚀 Amazon Job Monitor Started (Every 5 Minutes)");
+    console.log("🚀 Amazon Job Monitor Started");
+
+    // Start Telegram polling (runs forever in background)
+    startPolling();
+
+    console.log("🤖 Telegram Long Polling Started");
+
+    // Run immediately
+    await checkJobs();
+
+    // Schedule every 5 minutes
+    cron.schedule(
+        "*/5 * * * *",
+        checkJobs,
+        {
+            timezone: "Asia/Kolkata"
+        }
+    );
+
+    console.log("⏰ Amazon scan scheduled every 5 minutes");
+
+})();
